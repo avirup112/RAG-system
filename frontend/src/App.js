@@ -1,52 +1,38 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import ReactMarkdown from 'react-markdown';
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import './App.css';
 
-function ChatHistory({ chats, onSelectChat, onNewChat, selectedChatId }) {
+function MarkdownMessage({ text }) {
   return (
-    <div className="chat-history">
-      <div className="chat-history-header">
-        <h2>Chats</h2>
-        <button onClick={onNewChat} className="new-chat-btn">+ New Chat</button>
-      </div>
-      <ul className="chat-list">
-        {chats.map((chat) => (
-          <li
-            key={chat.id}
-            className={chat.id === selectedChatId ? 'selected' : ''}
-            onClick={() => onSelectChat(chat.id)}
-          >
-            {chat.title}
-          </li>
-        ))}
-      </ul>
-    </div>
+    <ReactMarkdown
+      children={text}
+      components={{
+        code({ node, inline, className, children, ...props }) {
+          const match = /language-(\w+)/.exec(className || '');
+          return !inline ? (
+            <SyntaxHighlighter
+              style={oneDark}
+              language={match ? match[1] : 'python'}
+              PreTag="div"
+              customStyle={{ borderRadius: '12px', margin: '18px 0', fontSize: '1.08rem', background: '#23232a', padding: '18px' }}
+              {...props}
+            >
+              {String(children).replace(/\n$/, '')}
+            </SyntaxHighlighter>
+          ) : (
+            <code className={className} {...props} style={{ background: '#23232a', padding: '2px 6px', borderRadius: '4px' }}>
+              {children}
+            </code>
+          );
+        },
+      }}
+    />
   );
 }
 
-function Avatar({ sender }) {
-  const isUser = sender === 'user';
-  return (
-    <div className={`avatar ${isUser ? 'avatar-user' : 'avatar-assistant'}`}> 
-      {isUser ? '🧑' : '🤖'}
-    </div>
-  );
-}
-
-function MessageBubble({ message }) {
-  const isUser = message.sender === 'user';
-  return (
-    <div className={`message-row ${isUser ? 'user' : 'assistant'} animated-bubble`}>
-      <Avatar sender={message.sender} />
-      <div className="bubble-and-time">
-        <div className={`message-bubble ${isUser ? 'user' : 'assistant'}`}>{message.text}</div>
-        {isUser && <div className="timestamp">{message.timestamp}</div>}
-      </div>
-    </div>
-  );
-}
-
-function TypingIndicator({ show }) {
-  if (!show) return null;
+function TypingIndicator() {
   return (
     <div className="typing-indicator">
       <span className="dot" />
@@ -57,159 +43,118 @@ function TypingIndicator({ show }) {
   );
 }
 
-function ChatWindow({ chat, messages, onSendMessage, typing }) {
-  const [input, setInput] = useState('');
-
-  const handleSend = (e) => {
-    e.preventDefault();
-    if (input.trim()) {
-      onSendMessage(input.trim());
-      setInput('');
-    }
-  };
-
-  return (
-    <div className="chat-window">
-      <div className="chat-header">
-        <h3>{chat ? chat.title : 'Select or create a chat'}</h3>
-      </div>
-      <div className="chat-body">
-        {chat && messages.length === 0 && (
-          <div className="empty-chat">Start the conversation!</div>
-        )}
-        {chat && messages.map((msg, idx) => (
-          <MessageBubble key={idx} message={msg} />
-        ))}
-        <TypingIndicator show={typing} />
-      </div>
-      {chat && (
-        <form className="chat-input-row" onSubmit={handleSend}>
-          <input
-            className="chat-input"
-            type="text"
-            placeholder="Type your message..."
-            value={input}
-            onChange={e => setInput(e.target.value)}
-            autoFocus
-          />
-          <button className="send-btn" type="submit">Send</button>
-        </form>
-      )}
-    </div>
-  );
-}
-
-function NewChatModal({ isOpen, onClose, onCreate }) {
-  const [chatName, setChatName] = useState('');
-
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    if (chatName.trim()) {
-      onCreate(chatName.trim());
-      setChatName('');
-    }
-  };
-
-  if (!isOpen) return null;
-  return (
-    <div className="modal-overlay">
-      <div className="modal-content">
-        <h2>New Chat</h2>
-        <form onSubmit={handleSubmit}>
-          <input
-            type="text"
-            placeholder="Enter chat name"
-            value={chatName}
-            onChange={e => setChatName(e.target.value)}
-            autoFocus
-          />
-          <div className="modal-actions">
-            <button type="button" onClick={onClose} className="modal-cancel">Cancel</button>
-            <button type="submit" className="modal-create">Create</button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-}
-
-function getCurrentTime() {
-  const now = new Date();
-  return now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-}
-
 function App() {
-  const [chats, setChats] = useState([
-    { id: 1, title: 'Chat 1' },
-    { id: 2, title: 'Chat 2' },
-  ]);
-  const [selectedChatId, setSelectedChatId] = useState(chats[0]?.id || null);
-  const [modalOpen, setModalOpen] = useState(false);
-  const [typing, setTyping] = useState(false);
-  const [messagesByChat, setMessagesByChat] = useState({
-    1: [
-      { sender: 'assistant', text: 'Hello! How can I help you today?', timestamp: getCurrentTime() },
-      { sender: 'user', text: 'Hi! Can you tell me about your features?', timestamp: getCurrentTime() },
-      { sender: 'assistant', text: 'Of course! I can answer questions, help with tasks, and more.', timestamp: getCurrentTime() },
-    ],
-    2: [],
+  const [input, setInput] = useState('');
+  const [messages, setMessages] = useState(() => {
+    const saved = localStorage.getItem('chat_history');
+    return saved ? JSON.parse(saved) : [];
   });
+  const [loading, setLoading] = useState(false);
+  const messagesEndRef = useRef(null);
 
-  const handleNewChat = () => {
-    setModalOpen(true);
-  };
+  useEffect(() => {
+    localStorage.setItem('chat_history', JSON.stringify(messages));
+  }, [messages]);
 
-  const handleCreateChat = (chatName) => {
-    const newId = chats.length ? Math.max(...chats.map(c => c.id)) + 1 : 1;
-    const newChat = { id: newId, title: chatName };
-    setChats([...chats, newChat]);
-    setSelectedChatId(newId);
-    setMessagesByChat({ ...messagesByChat, [newId]: [] });
-    setModalOpen(false);
-  };
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, loading]);
 
-  const handleSelectChat = (id) => {
-    setSelectedChatId(id);
-  };
-
-  const handleSendMessage = (text) => {
-    if (!selectedChatId) return;
-    setMessagesByChat(prev => ({
-      ...prev,
-      [selectedChatId]: [...(prev[selectedChatId] || []), { sender: 'user', text, timestamp: getCurrentTime() }],
-    }));
-    setTyping(true);
-    setTimeout(() => {
-      setMessagesByChat(prev => ({
+  const handleSend = async (e) => {
+    e.preventDefault();
+    if (!input.trim()) return;
+    const userMessage = { sender: 'user', text: input };
+    setMessages((prev) => [...prev, userMessage]);
+    setInput('');
+    setLoading(true);
+    try {
+      const response = await fetch('http://localhost:8000/api/chat/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question: input }),
+      });
+      const data = await response.json();
+      setMessages((prev) => [
         ...prev,
-        [selectedChatId]: [...(prev[selectedChatId] || []), { sender: 'assistant', text: 'This is a sample assistant reply.', timestamp: getCurrentTime() }],
-      }));
-      setTyping(false);
-    }, 1200);
+        { sender: 'bot', text: data.answer || 'No response.' },
+      ]);
+    } catch (err) {
+      setMessages((prev) => [
+        ...prev,
+        { sender: 'bot', text: 'Error connecting to backend.' },
+      ]);
+    } finally {
+      setLoading(false);
+    }
   };
-
-  const selectedChat = chats.find(c => c.id === selectedChatId);
-  const messages = selectedChat ? messagesByChat[selectedChatId] || [] : [];
 
   return (
-    <div className="app-container">
-      <ChatHistory
-        chats={chats}
-        onSelectChat={handleSelectChat}
-        onNewChat={handleNewChat}
-        selectedChatId={selectedChatId}
-      />
-      <ChatWindow
-        chat={selectedChat}
-        messages={messages}
-        onSendMessage={handleSendMessage}
-        typing={typing}
-      />
-      <NewChatModal
-        isOpen={modalOpen}
-        onClose={() => setModalOpen(false)}
-        onCreate={handleCreateChat}
-      />
+    <div className="gpt-bg">
+      <div className="gpt-sidebar">
+        <div className="gpt-sidebar-header">
+          <span className="gpt-logo">🧠</span>
+          <span className="gpt-title">ChatGPT</span>
+        </div>
+        <button className="gpt-sidebar-btn">+ New chat</button>
+        <div className="gpt-sidebar-section">
+          <div className="gpt-sidebar-item">Search chats</div>
+          <div className="gpt-sidebar-item">Library</div>
+          <div className="gpt-sidebar-item">Sora</div>
+        </div>
+        <div className="gpt-sidebar-section gpt-sidebar-bottom">
+          <div className="gpt-sidebar-user">Avirup Dasgupta<br /><span className="gpt-sidebar-user-type">Free</span></div>
+        </div>
+      </div>
+      <div className="gpt-main">
+        <div className="gpt-main-content">
+          {messages.length === 0 && !loading ? (
+            <div className="gpt-welcome">
+              <h1>What can I help with?</h1>
+              <div className="gpt-big-input-row wide">
+                <span className="gpt-attach-icon">📎</span>
+                <input
+                  className="gpt-big-input wide"
+                  placeholder="Ask anything"
+                  value={input}
+                  onChange={e => setInput(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && handleSend(e)}
+                  disabled={loading}
+                />
+                <span className="gpt-big-input-icon">🎤</span>
+                <button className="gpt-big-input-send" onClick={handleSend} disabled={loading}> <span role="img" aria-label="send">📤</span> </button>
+              </div>
+            </div>
+          ) : (
+            <div className="gpt-chat-area gpt-chat-area-flat">
+              {messages.map((msg, idx) => (
+                <div key={idx} className={`gpt-chat-message-flat ${msg.sender} ${msg.sender === 'user' ? 'right' : ''}`}> {/* user messages right-aligned */}
+                  {msg.sender === 'user' ? (
+                    <span>{msg.text}</span>
+                  ) : (
+                    <MarkdownMessage text={msg.text} />
+                  )}
+                </div>
+              ))}
+              {loading && <TypingIndicator />}
+              <div ref={messagesEndRef} />
+            </div>
+          )}
+        </div>
+        {messages.length > 0 || loading ? (
+          <form className="gpt-main-input-row wide" onSubmit={handleSend}>
+            <span className="gpt-attach-icon">📎</span>
+            <input
+              className="gpt-main-input wide"
+              placeholder="Send a message..."
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              disabled={loading}
+            />
+            <span className="gpt-main-input-icon">🎤</span>
+            <button className="gpt-main-input-send" type="submit" disabled={loading}> <span role="img" aria-label="send">📤</span> </button>
+          </form>
+        ) : null}
+      </div>
     </div>
   );
 }
